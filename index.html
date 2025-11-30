@@ -1042,6 +1042,12 @@
                 incompleteThreshold: 3, // Notify if 3 or fewer cards completed
                 lastNotificationDate: null
             },
+            cloudSync: {
+                enabled: false,
+                githubToken: '', // Personal access token
+                gistId: '', // Gist ID for storage
+                lastSync: null
+            },
             dailyQuestions: [
                 {
                     id: 'accomplishments',
@@ -1277,10 +1283,18 @@
             if (hour < 4) {
                 const yesterday = new Date(now);
                 yesterday.setDate(yesterday.getDate() - 1);
-                return yesterday.toISOString().split('T')[0];
+                // Use local date, not UTC
+                const year = yesterday.getFullYear();
+                const month = String(yesterday.getMonth() + 1).padStart(2, '0');
+                const day = String(yesterday.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
             }
             
-            return now.toISOString().split('T')[0];
+            // Use local date, not UTC
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         let state = {
@@ -1343,6 +1357,11 @@
 
         function saveEntries() {
             storage.setItem('journal_entries', JSON.stringify(state.entries));
+            
+            // Auto-sync to cloud if enabled (runs in background)
+            if (CONFIG.cloudSync.enabled) {
+                syncToCloud();
+            }
         }
 
         function updateEntry(questionId, value) {
@@ -1381,12 +1400,66 @@
                 // Save to entries
                 updateEntry(questionId, newAnswers);
                 
-                // Clear the state AFTER saving
+                // Clear the input state
                 state.currentTextInput = '';
                 state.currentImages = [];
                 
-                // Force re-render from saved data
-                render();
+                // Clear the textarea value
+                const textarea = document.getElementById(`text-input-${questionId}`);
+                if (textarea) {
+                    textarea.value = '';
+                }
+                
+                // Find the answer content container
+                const answerContent = textarea?.closest('.answer-content');
+                
+                if (answerContent) {
+                    // Check if previous-answers already exists
+                    let previousAnswersContainer = answerContent.querySelector('.previous-answers');
+                    
+                    // If it doesn't exist, create it
+                    if (!previousAnswersContainer) {
+                        previousAnswersContainer = document.createElement('div');
+                        previousAnswersContainer.className = 'previous-answers';
+                        // Insert before the image preview container
+                        const imagePreviewContainer = answerContent.querySelector(`#image-preview-${questionId}`);
+                        answerContent.insertBefore(previousAnswersContainer, imagePreviewContainer);
+                    }
+                    
+                    // Update the previous answers HTML
+                    previousAnswersContainer.innerHTML = newAnswers.map((answer, index) => {
+                        const isObject = typeof answer === 'object' && answer !== null;
+                        const text = isObject ? answer.text : answer;
+                        const images = isObject && answer.images ? answer.images : [];
+                        
+                        return `
+                            <div class="answer-item">
+                                <div class="answer-item-content">
+                                    ${text ? `<div class="answer-item-text">${text}</div>` : ''}
+                                    ${images && images.length > 0 ? `
+                                        <div class="answer-item-images">
+                                            ${images.map(img => `
+                                                <img src="${img}" class="answer-item-image" onclick="showImageModal('${img.replace(/'/g, "\\'")}')">
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <button class="answer-item-delete" onclick="deleteAnswer('${questionId}', ${index})">×</button>
+                            </div>
+                        `;
+                    }).join('');
+                }
+                
+                // Clear image previews
+                const imagePreviewContainer = document.getElementById(`image-preview-${questionId}`);
+                if (imagePreviewContainer) {
+                    imagePreviewContainer.innerHTML = '';
+                }
+                
+                // Refocus the textarea for next entry
+                if (textarea) {
+                    textarea.focus();
+                }
             }
         }
         
@@ -1807,20 +1880,33 @@
             let inputHTML = '';
             
             if (question.type === 'checkboxes') {
-                const checked = entry[question.id] || [];
+                const textAnswerId = question.id + '_text';
+                const answers = entry[textAnswerId] || [];
+                
+                // Get list of already-answered checkbox items
+                const answeredItems = answers.map(a => 
+                    typeof a === 'object' ? a.text : a
+                ).filter(Boolean);
+                
+                // Filter out checked items from the checkbox list
+                const remainingCheckboxes = question.checkboxes.filter(
+                    option => !answeredItems.includes(option)
+                );
+                
                 inputHTML = `
-                    <div class="checkboxes scrollable" style="background: ${theme.inputBg}">
-                        ${question.checkboxes.map(option => `
-                            <label class="checkbox-label">
-                                <input type="checkbox" value="${option}" 
-                                    ${checked.includes(option) ? 'checked' : ''}
-                                    onchange="handleCheckboxChange('${question.id}', '${option}')">
-                                <span>${option}</span>
-                            </label>
-                        `).join('')}
-                    </div>
+                    ${remainingCheckboxes.length > 0 ? `
+                        <div class="checkboxes scrollable" style="background: ${theme.inputBg}">
+                            ${remainingCheckboxes.map(option => `
+                                <label class="checkbox-label">
+                                    <input type="checkbox" value="${option}" 
+                                        onchange="handleCheckboxChange('${question.id}', '${option}')">
+                                    <span>${option}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    ` : ''}
                     
-                    ${renderTextAnswerSection(question.id + '_text', entry[question.id + '_text'], question.textPlaceholder, theme)}
+                    ${renderTextAnswerSection(textAnswerId, answers, question.textPlaceholder, theme)}
                 `;
             } else {
                 inputHTML = renderTextAnswerSection(question.id, entry[question.id], question.placeholder, theme);
@@ -1910,42 +1996,60 @@
 
         function handleCheckboxChange(questionId, value) {
             const entry = getCurrentEntry();
-            const checked = entry[questionId] || [];
+            const textAnswerId = questionId + '_text';
+            const currentAnswers = entry[textAnswerId] || [];
             
-            if (checked.includes(value)) {
-                updateEntry(questionId, checked.filter(v => v !== value));
-            } else {
-                updateEntry(questionId, [...checked, value]);
-            }
+            // Add this checkbox value as a new answer
+            const newAnswer = {
+                text: value,
+                images: []
+            };
+            
+            const newAnswers = Array.isArray(currentAnswers) ? 
+                [...currentAnswers, newAnswer] : 
+                [newAnswer];
+            
+            // Save to entries
+            updateEntry(textAnswerId, newAnswers);
+            
+            // Update the DOM to show the new answer and remove the checkbox
+            const answerContent = document.querySelector('.answer-content');
+            if (!answerContent) return;
             
             const theme = getTheme();
             const questions = getTodaysQuestions();
             const question = questions[state.currentQuestionIndex];
             const updatedEntry = getCurrentEntry();
+            const updatedAnswers = updatedEntry[textAnswerId] || [];
             
-            const inputHTML = question.type === 'checkboxes' 
-                ? `<div class="checkboxes scrollable" style="background: ${theme.inputBg}">
-                    ${question.checkboxes.map(option => `
-                        <label class="checkbox-label">
-                            <input type="checkbox" value="${option}" 
-                                ${(updatedEntry[question.id] || []).includes(option) ? 'checked' : ''}
-                                onchange="handleCheckboxChange('${question.id}', '${option}')">
-                            <span>${option}</span>
-                        </label>
-                    `).join('')}
+            // Get list of already-answered checkbox items
+            const answeredItems = updatedAnswers.map(a => 
+                typeof a === 'object' ? a.text : a
+            ).filter(Boolean);
+            
+            // Filter out checked items from the checkbox list
+            const remainingCheckboxes = question.checkboxes.filter(
+                option => !answeredItems.includes(option)
+            );
+            
+            // Render updated view
+            answerContent.innerHTML = `
+                <div class="answer-title" style="color: ${theme.text}">
+                    ${question.title}
                 </div>
-                ${renderTextAnswerSection(question.id + '_text', updatedEntry[question.id + '_text'], question.textPlaceholder, theme)}`
-                : renderTextAnswerSection(question.id, updatedEntry[question.id], question.placeholder, theme);
-            
-            const answerContent = document.querySelector('.answer-content');
-            if (answerContent) {
-                answerContent.innerHTML = `
-                    <div class="answer-title" style="color: ${theme.text}">
-                        ${question.title}
+                ${remainingCheckboxes.length > 0 ? `
+                    <div class="checkboxes scrollable" style="background: ${theme.inputBg}">
+                        ${remainingCheckboxes.map(option => `
+                            <label class="checkbox-label">
+                                <input type="checkbox" value="${option}" 
+                                    onchange="handleCheckboxChange('${question.id}', '${option}')">
+                                <span>${option}</span>
+                            </label>
+                        `).join('')}
                     </div>
-                    ${inputHTML}
-                `;
-            }
+                ` : ''}
+                ${renderTextAnswerSection(textAnswerId, updatedAnswers, question.textPlaceholder, theme)}
+            `;
         }
 
         function toggleMenu() {
@@ -1994,6 +2098,443 @@
             state.view = 'notifications';
             state.menuOpen = false;
             render();
+        }
+
+        function showDatePicker() {
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(0,0,0,0.9)';
+            overlay.style.zIndex = '999';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.padding = '20px';
+            
+            const container = document.createElement('div');
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.alignItems = 'center';
+            container.style.gap = '20px';
+            container.style.maxWidth = '400px';
+            container.style.width = '100%';
+            
+            const title = document.createElement('div');
+            title.textContent = 'Select a date to view/edit';
+            title.style.color = 'white';
+            title.style.fontSize = '20px';
+            title.style.fontWeight = '500';
+            title.style.textAlign = 'center';
+            
+            const dateInput = document.createElement('input');
+            dateInput.type = 'date';
+            dateInput.value = state.currentDate;
+            dateInput.style.padding = '16px';
+            dateInput.style.fontSize = '18px';
+            dateInput.style.borderRadius = '12px';
+            dateInput.style.border = 'none';
+            dateInput.style.width = '100%';
+            dateInput.style.maxWidth = '300px';
+            dateInput.style.textAlign = 'center';
+            
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '12px';
+            buttonContainer.style.width = '100%';
+            buttonContainer.style.maxWidth = '300px';
+            
+            const confirmBtn = document.createElement('button');
+            confirmBtn.textContent = 'Go to Date';
+            confirmBtn.style.flex = '1';
+            confirmBtn.style.padding = '16px 24px';
+            confirmBtn.style.borderRadius = '12px';
+            confirmBtn.style.border = 'none';
+            confirmBtn.style.background = 'white';
+            confirmBtn.style.color = '#2C3E50';
+            confirmBtn.style.fontSize = '16px';
+            confirmBtn.style.fontWeight = '600';
+            confirmBtn.style.cursor = 'pointer';
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.style.flex = '1';
+            cancelBtn.style.padding = '16px 24px';
+            cancelBtn.style.borderRadius = '12px';
+            cancelBtn.style.border = '2px solid white';
+            cancelBtn.style.background = 'transparent';
+            cancelBtn.style.color = 'white';
+            cancelBtn.style.fontSize = '16px';
+            cancelBtn.style.fontWeight = '600';
+            cancelBtn.style.cursor = 'pointer';
+            
+            confirmBtn.onclick = () => {
+                state.currentDate = dateInput.value;
+                state.currentQuestionIndex = 0;
+                state.showAnswerInput = false;
+                state.menuOpen = false;
+                overlay.remove();
+                render();
+                setTimeout(setupTouchHandlers, 0);
+            };
+            
+            cancelBtn.onclick = () => {
+                overlay.remove();
+            };
+            
+            overlay.onclick = (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                }
+            };
+            
+            buttonContainer.appendChild(confirmBtn);
+            buttonContainer.appendChild(cancelBtn);
+            
+            container.appendChild(title);
+            container.appendChild(dateInput);
+            container.appendChild(buttonContainer);
+            
+            overlay.appendChild(container);
+            
+            document.body.appendChild(overlay);
+            
+            // Open date picker after a short delay
+            setTimeout(() => {
+                dateInput.focus();
+                try {
+                    dateInput.showPicker();
+                } catch (e) {
+                    // showPicker not supported, that's okay
+                }
+            }, 100);
+        }
+
+        function showCloudSync() {
+            state.view = 'cloudsync';
+            state.menuOpen = false;
+            render();
+        }
+
+        async function syncToCloud() {
+            if (!CONFIG.cloudSync.enabled || !CONFIG.cloudSync.githubToken) {
+                return; // Silently skip if not configured
+            }
+
+            try {
+                const data = {
+                    entries: state.entries,
+                    config: CONFIG,
+                    lastSync: new Date().toISOString()
+                };
+
+                const response = await fetch(`https://api.github.com/gists/${CONFIG.cloudSync.gistId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `token ${CONFIG.cloudSync.githubToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: {
+                            'journal-data.json': {
+                                content: JSON.stringify(data, null, 2)
+                            }
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    CONFIG.cloudSync.lastSync = data.lastSync;
+                    saveConfig();
+                    console.log('Auto-synced to cloud');
+                } else {
+                    console.error('Sync failed:', response.status);
+                }
+            } catch (error) {
+                console.error('Sync error:', error);
+                // Fail silently in background
+            }
+        }
+
+        async function syncFromCloud() {
+            if (!CONFIG.cloudSync.enabled || !CONFIG.cloudSync.githubToken) {
+                return; // Silently skip if not configured
+            }
+
+            try {
+                const response = await fetch(`https://api.github.com/gists/${CONFIG.cloudSync.gistId}`, {
+                    headers: {
+                        'Authorization': `token ${CONFIG.cloudSync.githubToken}`
+                    }
+                });
+
+                if (response.ok) {
+                    const gist = await response.json();
+                    const content = gist.files['journal-data.json'].content;
+                    const data = JSON.parse(content);
+
+                    // Merge entries - keep most recent version of each entry
+                    const cloudEntries = data.entries || {};
+                    const localEntries = state.entries;
+                    
+                    // Simple merge: cloud overwrites if it has data for that date
+                    Object.keys(cloudEntries).forEach(date => {
+                        if (!localEntries[date] || JSON.stringify(cloudEntries[date]).length > JSON.stringify(localEntries[date]).length) {
+                            localEntries[date] = cloudEntries[date];
+                        }
+                    });
+                    
+                    state.entries = localEntries;
+                    CONFIG.cloudSync.lastSync = data.lastSync;
+                    
+                    saveEntries();
+                    saveConfig();
+                    console.log('Auto-synced from cloud');
+                } else {
+                    console.error('Download failed:', response.status);
+                }
+            } catch (error) {
+                console.error('Download error:', error);
+                // Fail silently in background
+            }
+        }
+
+        async function manualSyncToCloud() {
+            if (!CONFIG.cloudSync.enabled || !CONFIG.cloudSync.githubToken) {
+                alert('Please configure cloud sync first');
+                return;
+            }
+            
+            await syncToCloud();
+            alert('Uploaded to cloud successfully!');
+            render();
+        }
+
+        async function manualSyncFromCloud() {
+            if (!CONFIG.cloudSync.enabled || !CONFIG.cloudSync.githubToken) {
+                alert('Please configure cloud sync first');
+                return;
+            }
+            
+            await syncFromCloud();
+            alert('Downloaded from cloud successfully!');
+            render();
+        }
+
+        async function setupCloudSync() {
+            const token = document.getElementById('github-token').value.trim();
+            
+            if (!token) {
+                alert('Please enter a GitHub token');
+                return;
+            }
+
+            try {
+                // Create a new private gist
+                const response = await fetch('https://api.github.com/gists', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        description: 'Daily Journal Data (Private)',
+                        public: false,
+                        files: {
+                            'journal-data.json': {
+                                content: JSON.stringify({
+                                    entries: state.entries,
+                                    config: CONFIG,
+                                    lastSync: new Date().toISOString()
+                                }, null, 2)
+                            }
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    const gist = await response.json();
+                    CONFIG.cloudSync.enabled = true;
+                    CONFIG.cloudSync.githubToken = token;
+                    CONFIG.cloudSync.gistId = gist.id;
+                    CONFIG.cloudSync.lastSync = new Date().toISOString();
+                    saveConfig();
+                    alert('Cloud sync enabled! Your data is now backed up.');
+                    render();
+                } else {
+                    throw new Error('Failed to create gist');
+                }
+            } catch (error) {
+                console.error('Setup error:', error);
+                alert('Failed to set up cloud sync. Make sure your token has gist permissions.');
+            }
+        }
+
+        function renderCloudSync() {
+            const theme = getTheme();
+            
+            return `
+                <div style="background: ${theme.bg}; color: ${theme.text}; min-height: 100vh">
+                    <div class="settings-view">
+                        <div class="settings-header">
+                            <div class="settings-title" style="color: ${theme.text}">Cloud Sync</div>
+                            <button class="back-btn" style="background: ${theme.inputBg}; color: ${theme.text}" 
+                                    onclick="backToJournal()">Back to Journal</button>
+                        </div>
+                        
+                        <div class="settings-content">
+                            ${CONFIG.cloudSync.enabled ? `
+                                <div class="question-card" style="background: ${theme.inputBg}">
+                                    <div class="form-group">
+                                        <label class="form-label" style="color: ${theme.text}">Cloud Sync Status</label>
+                                        <div style="padding: 12px; background: rgba(0,255,0,0.2); border-radius: 8px; margin-top: 8px;">
+                                            ✓ Enabled
+                                        </div>
+                                        ${CONFIG.cloudSync.lastSync ? `
+                                            <div style="font-size: 14px; color: ${theme.textSecondary}; margin-top: 8px;">
+                                                Last synced: ${new Date(CONFIG.cloudSync.lastSync).toLocaleString()}
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <button class="back-btn" 
+                                                style="background: rgba(255,255,255,0.1); color: ${theme.text}; width: 100%; margin-bottom: 12px"
+                                                onclick="manualSyncToCloud()">
+                                            Upload to Cloud Now
+                                        </button>
+                                        <button class="back-btn" 
+                                                style="background: rgba(255,255,255,0.1); color: ${theme.text}; width: 100%"
+                                                onclick="manualSyncFromCloud()">
+                                            Download from Cloud Now
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <div style="padding: 12px; background: rgba(255,255,255,0.1); border-radius: 8px;">
+                                            <div style="font-size: 16px; margin-bottom: 8px;">✓ Automatic Sync Enabled</div>
+                                            <div style="font-size: 14px; color: ${theme.textSecondary};">
+                                                Your journal automatically syncs after each entry and when you open the app.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : `
+                                <div class="question-card" style="background: ${theme.inputBg}">
+                                    <div class="form-group">
+                                        <label class="form-label" style="color: ${theme.text}">Set Up Cloud Sync</label>
+                                        <div style="font-size: 14px; color: ${theme.textSecondary}; margin-bottom: 16px;">
+                                            Sync your journal across all devices using GitHub. Your data is stored privately in your GitHub account.
+                                        </div>
+                                        
+                                        <div style="font-size: 14px; color: ${theme.textSecondary}; margin-bottom: 12px;">
+                                            <strong>Steps:</strong><br>
+                                            1. Go to <a href="https://github.com/settings/tokens/new" target="_blank" style="color: white;">github.com/settings/tokens/new</a><br>
+                                            2. Create a token with "gist" permission<br>
+                                            3. Copy the token and paste it below
+                                        </div>
+                                        
+                                        <input type="password" 
+                                               id="github-token"
+                                               placeholder="Paste your GitHub token here"
+                                               style="width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 16px; background: rgba(0,0,0,0.3); color: ${theme.text}; margin-bottom: 12px;">
+                                        
+                                        <button class="back-btn" 
+                                                style="background: white; color: #2C3E50; width: 100%"
+                                                onclick="setupCloudSync()">
+                                            Enable Cloud Sync
+                                        </button>
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderNotificationSettings() {
+            const dateInput = document.createElement('input');
+            dateInput.type = 'date';
+            dateInput.value = state.currentDate;
+            dateInput.style.position = 'fixed';
+            dateInput.style.top = '50%';
+            dateInput.style.left = '50%';
+            dateInput.style.transform = 'translate(-50%, -50%)';
+            dateInput.style.zIndex = '1000';
+            dateInput.style.padding = '12px';
+            dateInput.style.fontSize = '16px';
+            dateInput.style.borderRadius = '8px';
+            dateInput.style.border = 'none';
+            
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(0,0,0,0.8)';
+            overlay.style.zIndex = '999';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.flexDirection = 'column';
+            overlay.style.gap = '20px';
+            
+            const title = document.createElement('div');
+            title.textContent = 'Select a date to view/edit';
+            title.style.color = 'white';
+            title.style.fontSize = '18px';
+            title.style.marginBottom = '10px';
+            
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '12px';
+            
+            const confirmBtn = document.createElement('button');
+            confirmBtn.textContent = 'Go to Date';
+            confirmBtn.style.padding = '12px 24px';
+            confirmBtn.style.borderRadius = '8px';
+            confirmBtn.style.border = 'none';
+            confirmBtn.style.background = 'white';
+            confirmBtn.style.fontSize = '16px';
+            confirmBtn.style.cursor = 'pointer';
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.style.padding = '12px 24px';
+            cancelBtn.style.borderRadius = '8px';
+            cancelBtn.style.border = '1px solid white';
+            cancelBtn.style.background = 'transparent';
+            cancelBtn.style.color = 'white';
+            cancelBtn.style.fontSize = '16px';
+            cancelBtn.style.cursor = 'pointer';
+            
+            confirmBtn.onclick = () => {
+                state.currentDate = dateInput.value;
+                state.currentQuestionIndex = 0;
+                state.showAnswerInput = false;
+                state.menuOpen = false;
+                overlay.remove();
+                render();
+                setTimeout(setupTouchHandlers, 0);
+            };
+            
+            cancelBtn.onclick = () => {
+                overlay.remove();
+            };
+            
+            buttonContainer.appendChild(confirmBtn);
+            buttonContainer.appendChild(cancelBtn);
+            
+            overlay.appendChild(title);
+            overlay.appendChild(dateInput);
+            overlay.appendChild(buttonContainer);
+            
+            document.body.appendChild(overlay);
+            dateInput.showPicker();
         }
 
         function renderNotificationSettings() {
@@ -2155,11 +2696,37 @@
         }
 
         function backToJournal() {
+            console.log('backToJournal called - current date:', state.currentDate);
+            const today = getCurrentDateWith4AMCutoff();
+            console.log('Today should be:', today);
+            
             state.view = 'journal';
+            state.currentDate = today;
             state.currentQuestionIndex = 0;
             state.showAnswerInput = false;
             state.currentTextInput = '';
+            state.currentImages = [];
+            state.menuOpen = false;
+            
+            console.log('State after update:', state.currentDate, state.currentQuestionIndex);
+            
             render();
+            setTimeout(setupTouchHandlers, 0);
+        }
+
+        function showTodaysSummary() {
+            state.view = 'review';
+            state.menuOpen = false;
+            render();
+            
+            // Scroll to today's entry if it exists
+            setTimeout(() => {
+                const today = getCurrentDateWith4AMCutoff();
+                const todayEntry = document.querySelector(`[data-entry-date="${today}"]`);
+                if (todayEntry) {
+                    todayEntry.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 100);
         }
 
         function renderReview() {
@@ -2181,7 +2748,7 @@
                         ` : sortedDates.map(date => {
                             const entry = state.entries[date];
                             return `
-                                <div class="entry" style="background: ${theme.inputBg}">
+                                <div class="entry" style="background: ${theme.inputBg}" data-entry-date="${date}">
                                     <div class="entry-date" style="color: ${theme.textSecondary}">
                                         ${new Date(date + 'T00:00:00').toLocaleDateString('en-US', { 
                                             weekday: 'long', 
@@ -2201,9 +2768,30 @@
                                                 const value = entry[key];
                                                 if (!value || (Array.isArray(value) && value.length === 0)) return '';
                                                 
-                                                const displayValue = Array.isArray(value) ? 
-                                                    value.map(v => `• ${typeof v === 'object' ? v.text : v}`).join('<br>') : 
-                                                    value;
+                                                let displayValue = '';
+                                                if (Array.isArray(value)) {
+                                                    // Handle array of answers (could be objects with text and images)
+                                                    displayValue = value.map(v => {
+                                                        if (typeof v === 'object' && v !== null) {
+                                                            let html = '';
+                                                            if (v.text) {
+                                                                html += `• ${v.text}`;
+                                                            }
+                                                            if (v.images && v.images.length > 0) {
+                                                                html += '<br><div style="display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap;">';
+                                                                v.images.forEach(img => {
+                                                                    html += `<img src="${img}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer;" onclick="showImageModal('${img.replace(/'/g, "\\'")}')">`;
+                                                                });
+                                                                html += '</div>';
+                                                            }
+                                                            return html;
+                                                        } else {
+                                                            return `• ${v}`;
+                                                        }
+                                                    }).join('<br>');
+                                                } else {
+                                                    displayValue = value;
+                                                }
                                                 
                                                 return `
                                                     <div class="entry-question">${question.title}</div>
@@ -2753,6 +3341,11 @@
                 return;
             }
             
+            if (state.view === 'cloudsync') {
+                app.innerHTML = renderCloudSync();
+                return;
+            }
+            
             const content = state.showAnswerInput ? renderAnswerView() : renderQuestionView();
             
             app.innerHTML = `
@@ -2767,9 +3360,12 @@
                     <div class="menu ${state.menuOpen ? 'show' : ''}" 
                          style="background: ${theme.inputBg}; color: ${theme.text}"
                          onclick="event.stopPropagation()">
+                        <button style="color: ${theme.text}" onclick="showTodaysSummary()">Today's Summary</button>
+                        <button style="color: ${theme.text}" onclick="showDatePicker()">Change Date</button>
                         <button style="color: ${theme.text}" onclick="showReview()">View Past Entries</button>
                         <button style="color: ${theme.text}" onclick="showSettings()">Question Settings</button>
                         <button style="color: ${theme.text}" onclick="showNotificationSettings()">Notification Settings</button>
+                        <button style="color: ${theme.text}" onclick="showCloudSync()">Cloud Sync</button>
                     </div>
                     
                     ${content}
@@ -2818,12 +3414,24 @@
         function handleImageSelect(questionId, event) {
             const files = Array.from(event.target.files);
             
+            if (files.length === 0) return;
+            
+            let filesProcessed = 0;
+            
             files.forEach(file => {
                 if (file.type.startsWith('image/')) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         state.currentImages.push(e.target.result);
-                        updateImagePreviews(questionId);
+                        filesProcessed++;
+                        
+                        // After all files are loaded, auto-submit
+                        if (filesProcessed === files.length) {
+                            // Auto-submit the images
+                            setTimeout(() => {
+                                addAnswer(questionId);
+                            }, 100);
+                        }
                     };
                     reader.readAsDataURL(file);
                 }
@@ -2857,6 +3465,16 @@
         // Initialize app
         loadConfig();
         loadEntries();
+        
+        // Auto-sync from cloud on startup (download latest)
+        if (CONFIG.cloudSync.enabled) {
+            syncFromCloud().then(() => {
+                render();
+                if (state.view === 'journal') {
+                    setTimeout(setupTouchHandlers, 0);
+                }
+            });
+        }
         
         // Start notification scheduler if enabled
         if (CONFIG.notifications.enabled) {
@@ -2972,3 +3590,4 @@
     </script>
 </body>
 </html>
+
