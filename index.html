@@ -387,7 +387,7 @@
             display: flex;
             flex-direction: column;
             padding: 32px;
-            padding-bottom: 100px;
+            padding-bottom: 32px;
             position: relative;
             z-index: 2;
             overflow-y: auto;
@@ -408,12 +408,44 @@
             font-size: 28px;
             font-weight: 300;
             margin-bottom: 32px;
+            flex: 1;
+        }
+        
+        .answer-title-container {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            width: 100%;
         }
         
         .previous-answers {
             margin-bottom: 16px;
-            max-height: 250px;
+            max-height: calc(100vh - 325px);
             overflow-y: auto;
+            overflow-x: hidden;
+            scroll-behavior: smooth;
+            display: flex;
+            flex-direction: column;
+            /* Hide scrollbar but keep functionality */
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.2) transparent;
+        }
+        
+        .previous-answers::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .previous-answers::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .previous-answers::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+        }
+        
+        .previous-answers::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.3);
         }
         
         .answer-item {
@@ -478,12 +510,13 @@
             gap: 12px;
             align-items: flex-end;
             position: fixed;
-            bottom: 90px;
+            bottom: 20px;
             left: 32px;
             right: 32px;
             max-width: 800px;
             margin: 0 auto;
             z-index: 10;
+            padding-bottom: 8px;
         }
         
         .input-section::before {
@@ -682,6 +715,102 @@
         }
         
         .submit-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .textarea-container {
+            position: relative;
+            flex: 1;
+            display: flex;
+        }
+        
+        .textarea-container textarea {
+            padding-right: 56px; /* Make room for + button */
+        }
+        
+        .submit-btn-inside {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0,0,0,0.3);
+            color: white;
+            font-size: 24px;
+            font-weight: 300;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            padding: 0;
+            z-index: 5;
+        }
+        
+        .submit-btn-inside:hover {
+            background: rgba(0,0,0,0.5);
+            transform: scale(1.05);
+        }
+        
+        .submit-btn-inside:active {
+            transform: scale(0.95);
+        }
+        
+        .list-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .list-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.05);
+        }
+        
+        .list-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .list-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .toggle-checklist-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255,255,255,0.15);
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+        
+        .toggle-checklist-btn:hover {
+            background: rgba(255,255,255,0.25);
+        }
+        
+        .toggle-checklist-btn:active {
             transform: scale(0.95);
         }
         
@@ -1448,12 +1577,20 @@
                             </div>
                         `;
                     }).join('');
+                    
+                    // Immediately scroll to bottom to show newest item
+                    previousAnswersContainer.scrollTop = previousAnswersContainer.scrollHeight;
                 }
                 
                 // Clear image previews
                 const imagePreviewContainer = document.getElementById(`image-preview-${questionId}`);
                 if (imagePreviewContainer) {
                     imagePreviewContainer.innerHTML = '';
+                }
+                
+                // Scroll previous answers to bottom to show newest item
+                if (previousAnswersContainer) {
+                    previousAnswersContainer.scrollTop = previousAnswersContainer.scrollHeight;
                 }
                 
                 // Refocus the textarea for next entry
@@ -1470,6 +1607,291 @@
             }
         }
 
+        function scrollAnswersToBottom() {
+            const previousAnswers = document.querySelector('.previous-answers');
+            if (previousAnswers) {
+                // Force immediate scroll to bottom
+                previousAnswers.scrollTop = previousAnswers.scrollHeight;
+                // Also try after a small delay in case content is still rendering
+                setTimeout(() => {
+                    previousAnswers.scrollTop = previousAnswers.scrollHeight;
+                }, 50);
+            }
+        }
+
+        function toggleChecklistSection() {
+            const section = document.getElementById('checklist-section');
+            const editBtn = document.getElementById('edit-checklist-btn');
+            if (!section) return;
+            
+            if (section.style.display === 'none' || section.style.display === '') {
+                // Show the section
+                section.style.display = 'grid';
+                // Small delay to allow display change to register
+                setTimeout(() => {
+                    section.style.maxHeight = '300px';
+                }, 10);
+                // Show edit button
+                if (editBtn) editBtn.style.display = 'flex';
+            } else {
+                // Hide the section
+                section.style.maxHeight = '0';
+                setTimeout(() => {
+                    section.style.display = 'none';
+                }, 300); // Match transition duration
+                // Hide edit button
+                if (editBtn) editBtn.style.display = 'none';
+            }
+        }
+
+        function showChecklistModal(questionId) {
+            const questions = getTodaysQuestions();
+            const currentQuestion = questions[state.currentQuestionIndex];
+            
+            // Only show for checkbox questions
+            if (currentQuestion.type !== 'checkboxes') return;
+            
+            // Find the actual question in CONFIG to modify
+            const configQuestion = [...CONFIG.dailyQuestions, ...CONFIG.daySpecificQuestions.questions]
+                .find(q => q.id === currentQuestion.id);
+            
+            if (!configQuestion) return;
+            
+            const theme = getTheme();
+            const entry = getCurrentEntry();
+            const textAnswerId = questionId + '_text';
+            const answers = entry[textAnswerId] || [];
+            
+            // Get list of already-answered checkbox items
+            const answeredItems = answers.map(a => 
+                typeof a === 'object' ? a.text : a
+            ).filter(Boolean);
+            
+            // Filter out checked items from the checkbox list
+            const remainingCheckboxes = configQuestion.checkboxes.filter(
+                option => !answeredItems.includes(option)
+            );
+            
+            // Create modal overlay
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(0,0,0,0.6)';
+            overlay.style.zIndex = '999';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.padding = '20px';
+            
+            const container = document.createElement('div');
+            container.style.background = theme.inputBg;
+            container.style.borderRadius = '12px';
+            container.style.padding = '24px';
+            container.style.maxWidth = '500px';
+            container.style.width = '100%';
+            container.style.maxHeight = '80vh';
+            container.style.overflowY = 'auto';
+            
+            const title = document.createElement('div');
+            title.textContent = currentQuestion.title;
+            title.style.fontSize = '20px';
+            title.style.fontWeight = '500';
+            title.style.color = theme.text;
+            title.style.marginBottom = '20px';
+            
+            const itemsContainer = document.createElement('div');
+            itemsContainer.style.display = 'flex';
+            itemsContainer.style.flexDirection = 'column';
+            itemsContainer.style.gap = '8px';
+            itemsContainer.style.marginBottom = '20px';
+            
+            const renderItems = () => {
+                itemsContainer.innerHTML = '';
+                
+                // Get current answers to show which are selected
+                const currentEntry = getCurrentEntry();
+                const currentAnswers = currentEntry[textAnswerId] || [];
+                const answeredItems = currentAnswers.map(a => 
+                    typeof a === 'object' ? a.text : a
+                ).filter(Boolean);
+                
+                configQuestion.checkboxes.forEach(option => {
+                    const isSelected = answeredItems.includes(option);
+                    
+                    const itemDiv = document.createElement('div');
+                    itemDiv.style.display = 'flex';
+                    itemDiv.style.alignItems = 'center';
+                    itemDiv.style.justifyContent = 'space-between';
+                    itemDiv.style.padding = '12px';
+                    itemDiv.style.background = isSelected ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)';
+                    itemDiv.style.borderRadius = '8px';
+                    itemDiv.style.cursor = 'pointer';
+                    itemDiv.style.color = theme.text;
+                    itemDiv.style.transition = 'all 0.2s';
+                    
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = option;
+                    textSpan.style.flex = '1';
+                    textSpan.style.fontWeight = isSelected ? 'bold' : 'normal';
+                    
+                    const removeBtn = document.createElement('button');
+                    removeBtn.textContent = '−';
+                    removeBtn.style.width = '28px';
+                    removeBtn.style.height = '28px';
+                    removeBtn.style.borderRadius = '50%';
+                    removeBtn.style.border = 'none';
+                    removeBtn.style.background = 'rgba(255,0,0,0.3)';
+                    removeBtn.style.color = 'white';
+                    removeBtn.style.fontSize = '20px';
+                    removeBtn.style.cursor = 'pointer';
+                    removeBtn.style.display = 'flex';
+                    removeBtn.style.alignItems = 'center';
+                    removeBtn.style.justifyContent = 'center';
+                    removeBtn.style.lineHeight = '1';
+                    removeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        // Remove from configQuestion.checkboxes array
+                        const index = configQuestion.checkboxes.indexOf(option);
+                        if (index > -1) {
+                            configQuestion.checkboxes.splice(index, 1);
+                            saveConfig();
+                            renderItems();
+                        }
+                    };
+                    
+                    itemDiv.onclick = () => {
+                        const textAnswerId = questionId + '_text';
+                        const entry = getCurrentEntry();
+                        const currentAnswers = entry[textAnswerId] || [];
+                        
+                        // Check if already selected
+                        const answeredItems = currentAnswers.map(a => 
+                            typeof a === 'object' ? a.text : a
+                        ).filter(Boolean);
+                        
+                        if (answeredItems.includes(option)) {
+                            // Already selected - deselect it
+                            const newAnswers = currentAnswers.filter(a => {
+                                const text = typeof a === 'object' ? a.text : a;
+                                return text !== option;
+                            });
+                            updateEntry(textAnswerId, newAnswers);
+                        } else {
+                            // Not selected - add it
+                            const newAnswer = {
+                                text: option,
+                                images: []
+                            };
+                            const newAnswers = [...currentAnswers, newAnswer];
+                            updateEntry(textAnswerId, newAnswers);
+                        }
+                        
+                        // Re-render items to show updated selection state
+                        renderItems();
+                    };
+                    
+                    itemDiv.appendChild(textSpan);
+                    itemDiv.appendChild(removeBtn);
+                    itemsContainer.appendChild(itemDiv);
+                });
+            };
+            
+            renderItems();
+            
+            // Add new item section
+            const addSection = document.createElement('div');
+            addSection.style.display = 'flex';
+            addSection.style.gap = '8px';
+            addSection.style.marginBottom = '20px';
+            
+            const addInput = document.createElement('input');
+            addInput.type = 'text';
+            addInput.placeholder = 'Add new item...';
+            addInput.style.flex = '1';
+            addInput.style.padding = '12px';
+            addInput.style.borderRadius = '8px';
+            addInput.style.border = 'none';
+            addInput.style.background = 'rgba(255,255,255,0.1)';
+            addInput.style.color = theme.text;
+            addInput.style.fontSize = '16px';
+            
+            const addBtn = document.createElement('button');
+            addBtn.textContent = '+';
+            addBtn.style.width = '44px';
+            addBtn.style.height = '44px';
+            addBtn.style.borderRadius = '50%';
+            addBtn.style.border = 'none';
+            addBtn.style.background = 'rgba(255,255,255,0.2)';
+            addBtn.style.color = theme.text;
+            addBtn.style.fontSize = '24px';
+            addBtn.style.cursor = 'pointer';
+            addBtn.style.display = 'flex';
+            addBtn.style.alignItems = 'center';
+            addBtn.style.justifyContent = 'center';
+            addBtn.style.lineHeight = '1';
+            
+            const addNewItem = () => {
+                const newItem = addInput.value.trim();
+                if (newItem) {
+                    configQuestion.checkboxes.push(newItem);
+                    saveConfig();
+                    addInput.value = '';
+                    renderItems();
+                }
+            };
+            
+            addBtn.onclick = addNewItem;
+            addInput.onkeydown = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addNewItem();
+                }
+            };
+            
+            addSection.appendChild(addInput);
+            addSection.appendChild(addBtn);
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Done';
+            closeBtn.style.width = '100%';
+            closeBtn.style.padding = '12px';
+            closeBtn.style.borderRadius = '8px';
+            closeBtn.style.border = 'none';
+            closeBtn.style.background = 'rgba(255,255,255,0.2)';
+            closeBtn.style.color = theme.text;
+            closeBtn.style.fontSize = '16px';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.onclick = () => {
+                overlay.remove();
+                // Re-render to update the previous answers display
+                render();
+                setTimeout(setupTouchHandlers, 0);
+            };
+            
+            overlay.onclick = (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    // Re-render to update the previous answers display
+                    render();
+                    setTimeout(setupTouchHandlers, 0);
+                }
+            };
+            
+            container.appendChild(title);
+            container.appendChild(itemsContainer);
+            container.appendChild(addSection);
+            container.appendChild(closeBtn);
+            overlay.appendChild(container);
+            
+            document.body.appendChild(overlay);
+            
+            // Focus the add input for easy typing
+            setTimeout(() => addInput.focus(), 100);
+        }
+
         function deleteAnswer(questionId, index) {
             const entry = getCurrentEntry();
             const currentAnswers = entry[questionId] || [];
@@ -1478,33 +1900,34 @@
                 const newAnswers = currentAnswers.filter((_, i) => i !== index);
                 updateEntry(questionId, newAnswers);
                 
-                const theme = getTheme();
-                const questions = getTodaysQuestions();
-                const question = questions[state.currentQuestionIndex];
-                const updatedEntry = getCurrentEntry();
-                
-                const inputHTML = question.type === 'checkboxes' 
-                    ? `<div class="checkboxes scrollable" style="background: ${theme.inputBg}">
-                        ${question.checkboxes.map(option => `
-                            <label class="checkbox-label">
-                                <input type="checkbox" value="${option}" 
-                                    ${(updatedEntry[question.id] || []).includes(option) ? 'checked' : ''}
-                                    onchange="handleCheckboxChange('${question.id}', '${option}')">
-                                <span>${option}</span>
-                            </label>
-                        `).join('')}
-                    </div>
-                    ${renderTextAnswerSection(question.id + '_text', updatedEntry[question.id + '_text'], question.textPlaceholder, theme)}`
-                    : renderTextAnswerSection(question.id, updatedEntry[question.id], question.placeholder, theme);
-                
-                const answerContent = document.querySelector('.answer-content');
-                if (answerContent) {
-                    answerContent.innerHTML = `
-                        <div class="answer-title" style="color: ${theme.text}">
-                            ${question.title}
-                        </div>
-                        ${inputHTML}
-                    `;
+                // Update just the previous-answers container
+                const previousAnswersContainer = document.querySelector('.previous-answers');
+                if (previousAnswersContainer) {
+                    const theme = getTheme();
+                    previousAnswersContainer.innerHTML = newAnswers.map((answer, idx) => {
+                        const isObject = typeof answer === 'object' && answer !== null;
+                        const text = isObject ? answer.text : answer;
+                        const images = isObject && answer.images ? answer.images : [];
+                        
+                        return `
+                            <div class="answer-item">
+                                <div class="answer-item-content">
+                                    ${text ? `<div class="answer-item-text">${text}</div>` : ''}
+                                    ${images && images.length > 0 ? `
+                                        <div class="answer-item-images">
+                                            ${images.map(img => `
+                                                <img src="${img}" class="answer-item-image" onclick="showImageModal('${img.replace(/'/g, "\\'")}')">
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <button class="answer-item-delete" onclick="deleteAnswer('${questionId}', ${idx})">×</button>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    // Scroll to bottom
+                    previousAnswersContainer.scrollTop = previousAnswersContainer.scrollHeight;
                 }
             }
         }
@@ -1537,6 +1960,7 @@
             state.showAnswerInput = true;
             state.slideDirection = 'bottom';
             render();
+            setTimeout(scrollAnswersToBottom, 100);
         }
 
         function hideAnswerInput() {
@@ -1895,7 +2319,7 @@
                 
                 inputHTML = `
                     ${remainingCheckboxes.length > 0 ? `
-                        <div class="checkboxes scrollable" style="background: ${theme.inputBg}">
+                        <div class="checkboxes scrollable" id="checklist-section" style="background: ${theme.inputBg}; display: none; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-in-out;">
                             ${remainingCheckboxes.map(option => `
                                 <label class="checkbox-label">
                                     <input type="checkbox" value="${option}" 
@@ -1906,10 +2330,10 @@
                         </div>
                     ` : ''}
                     
-                    ${renderTextAnswerSection(textAnswerId, answers, question.textPlaceholder, theme)}
+                    ${renderTextAnswerSection(textAnswerId, answers, question.textPlaceholder, theme, question)}
                 `;
             } else {
-                inputHTML = renderTextAnswerSection(question.id, entry[question.id], question.placeholder, theme);
+                inputHTML = renderTextAnswerSection(question.id, entry[question.id], question.placeholder, theme, question);
             }
             
             return `
@@ -1920,23 +2344,27 @@
                     
                     <div class="answer-view">
                         <div class="answer-content">
-                            <div class="answer-title" style="color: ${theme.text}">
-                                ${question.title}
+                            <div class="answer-title-container">
+                                <div class="answer-title" style="color: ${theme.text}">
+                                    ${question.title}
+                                </div>
+                                ${question.type === 'checkboxes' && question.checkboxes && question.checkboxes.length > 0 ? `
+                                    <button class="toggle-checklist-btn" id="edit-checklist-btn" onclick="showChecklistModal('${question.id}')" style="display: none;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M18.5 2.50001C18.8978 2.10219 19.4374 1.87869 20 1.87869C20.5626 1.87869 21.1022 2.10219 21.5 2.50001C21.8978 2.89784 22.1213 3.43741 22.1213 4.00001C22.1213 4.56262 21.8978 5.10219 21.5 5.50001L12 15L8 16L9 12L18.5 2.50001Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                ` : ''}
                             </div>
                             ${inputHTML}
                         </div>
-                    </div>
-                    
-                    <div class="nav-arrows">
-                        <div class="nav-arrow arrow-left" onclick="goToPreviousQuestion()" 
-                             style="opacity: ${state.currentQuestionIndex > 0 ? 0.6 : 0.2}"></div>
-                        <div class="nav-arrow arrow-right" onclick="goToNextQuestion()"></div>
                     </div>
                 </div>
             `;
         }
 
-        function renderTextAnswerSection(questionId, answers, placeholder, theme) {
+        function renderTextAnswerSection(questionId, answers, placeholder, theme, question) {
             const answerList = Array.isArray(answers) ? answers : [];
             
             return `
@@ -1970,18 +2398,37 @@
                 
                 <div class="input-section">
                     <input type="file" id="image-input-${questionId}" class="image-input" accept="image/*" multiple onchange="handleImageSelect('${questionId}', event)">
-                    <textarea 
-                        id="text-input-${questionId}"
-                        style="background: ${theme.inputBg}" 
-                        placeholder="${placeholder}"
-                        oninput="state.currentTextInput = this.value"
-                        onkeydown="handleTextareaKeydown(event, '${questionId}')"
-                    >${state.currentTextInput}</textarea>
+                    
+                    <div class="textarea-container">
+                        <textarea 
+                            id="text-input-${questionId}"
+                            style="background: ${theme.inputBg}" 
+                            placeholder="${placeholder}"
+                            oninput="state.currentTextInput = this.value"
+                            onkeydown="handleTextareaKeydown(event, '${questionId}')"
+                            onfocus="scrollAnswersToBottom()"
+                        >${state.currentTextInput}</textarea>
+                        <button class="submit-btn-inside" onclick="addAnswer('${questionId}')">+</button>
+                    </div>
+                    
                     <div class="input-buttons">
+                        ${question.type === 'checkboxes' ? `
+                            <button class="list-btn" onclick="toggleChecklistSection()">
+                                <div class="list-icon">
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="2" y="3" width="3" height="3" stroke="white" stroke-width="1.5"/>
+                                        <line x1="7" y1="4.5" x2="18" y2="4.5" stroke="white" stroke-width="1.5"/>
+                                        <rect x="2" y="8.5" width="3" height="3" stroke="white" stroke-width="1.5"/>
+                                        <line x1="7" y1="10" x2="18" y2="10" stroke="white" stroke-width="1.5"/>
+                                        <rect x="2" y="14" width="3" height="3" stroke="white" stroke-width="1.5"/>
+                                        <line x1="7" y1="15.5" x2="18" y2="15.5" stroke="white" stroke-width="1.5"/>
+                                    </svg>
+                                </div>
+                            </button>
+                        ` : ''}
                         <button class="image-btn" onclick="document.getElementById('image-input-${questionId}').click()">
                             <div class="camera-icon"></div>
                         </button>
-                        <button class="submit-btn" onclick="addAnswer('${questionId}')">+</button>
                     </div>
                 </div>
             `;
@@ -1995,6 +2442,8 @@
         }
 
         function handleCheckboxChange(questionId, value) {
+            console.log('handleCheckboxChange called:', questionId, value);
+            
             const entry = getCurrentEntry();
             const textAnswerId = questionId + '_text';
             const currentAnswers = entry[textAnswerId] || [];
@@ -2009,16 +2458,21 @@
                 [...currentAnswers, newAnswer] : 
                 [newAnswer];
             
+            console.log('Saving answers:', newAnswers);
+            
             // Save to entries
             updateEntry(textAnswerId, newAnswers);
             
-            // Update the DOM to show the new answer and remove the checkbox
-            const answerContent = document.querySelector('.answer-content');
-            if (!answerContent) return;
-            
-            const theme = getTheme();
+            // Get the current question
             const questions = getTodaysQuestions();
             const question = questions[state.currentQuestionIndex];
+            
+            if (!question || question.type !== 'checkboxes') {
+                console.error('Question not found or not checkbox type');
+                return;
+            }
+            
+            // Get updated answers to filter checkboxes
             const updatedEntry = getCurrentEntry();
             const updatedAnswers = updatedEntry[textAnswerId] || [];
             
@@ -2032,24 +2486,90 @@
                 option => !answeredItems.includes(option)
             );
             
-            // Render updated view
-            answerContent.innerHTML = `
-                <div class="answer-title" style="color: ${theme.text}">
-                    ${question.title}
-                </div>
-                ${remainingCheckboxes.length > 0 ? `
-                    <div class="checkboxes scrollable" style="background: ${theme.inputBg}">
-                        ${remainingCheckboxes.map(option => `
-                            <label class="checkbox-label">
-                                <input type="checkbox" value="${option}" 
-                                    onchange="handleCheckboxChange('${question.id}', '${option}')">
-                                <span>${option}</span>
-                            </label>
-                        `).join('')}
-                    </div>
-                ` : ''}
-                ${renderTextAnswerSection(textAnswerId, updatedAnswers, question.textPlaceholder, theme)}
-            `;
+            const theme = getTheme();
+            
+            // Update the checkboxes container
+            const checkboxContainer = document.querySelector('.checkboxes.scrollable');
+            if (checkboxContainer && remainingCheckboxes.length > 0) {
+                checkboxContainer.innerHTML = remainingCheckboxes.map(option => `
+                    <label class="checkbox-label">
+                        <input type="checkbox" value="${option}" 
+                            onchange="handleCheckboxChange('${question.id}', '${option}')">
+                        <span>${option}</span>
+                    </label>
+                `).join('');
+            } else if (checkboxContainer) {
+                checkboxContainer.remove();
+            }
+            
+            // Update the previous answers list
+            const previousAnswersContainer = document.querySelector('.previous-answers');
+            if (previousAnswersContainer) {
+                previousAnswersContainer.innerHTML = updatedAnswers.map((answer, index) => {
+                    const isObject = typeof answer === 'object' && answer !== null;
+                    const text = isObject ? answer.text : answer;
+                    const images = isObject && answer.images ? answer.images : [];
+                    
+                    return `
+                        <div class="answer-item">
+                            <div class="answer-item-content">
+                                ${text ? `<div class="answer-item-text">${text}</div>` : ''}
+                                ${images && images.length > 0 ? `
+                                    <div class="answer-item-images">
+                                        ${images.map(img => `
+                                            <img src="${img}" class="answer-item-image" onclick="showImageModal('${img.replace(/'/g, "\\'")}')">
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <button class="answer-item-delete" onclick="deleteAnswer('${textAnswerId}', ${index})">×</button>
+                        </div>
+                    `;
+                }).join('');
+                
+                // Scroll to bottom to show new item
+                previousAnswersContainer.scrollTop = previousAnswersContainer.scrollHeight;
+            } else {
+                // Create previous answers container if it doesn't exist
+                const answerContent = document.querySelector('.answer-content');
+                if (answerContent) {
+                    const imagePreview = answerContent.querySelector('.image-preview-container');
+                    const newContainer = document.createElement('div');
+                    newContainer.className = 'previous-answers';
+                    newContainer.innerHTML = updatedAnswers.map((answer, index) => {
+                        const isObject = typeof answer === 'object' && answer !== null;
+                        const text = isObject ? answer.text : answer;
+                        const images = isObject && answer.images ? answer.images : [];
+                        
+                        return `
+                            <div class="answer-item">
+                                <div class="answer-item-content">
+                                    ${text ? `<div class="answer-item-text">${text}</div>` : ''}
+                                    ${images && images.length > 0 ? `
+                                        <div class="answer-item-images">
+                                            ${images.map(img => `
+                                                <img src="${img}" class="answer-item-image" onclick="showImageModal('${img.replace(/'/g, "\\'")}')">
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <button class="answer-item-delete" onclick="deleteAnswer('${textAnswerId}', ${index})">×</button>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    if (imagePreview) {
+                        answerContent.insertBefore(newContainer, imagePreview);
+                    } else {
+                        const inputSection = answerContent.querySelector('.input-section');
+                        if (inputSection) {
+                            answerContent.insertBefore(newContainer, inputSection);
+                        }
+                    }
+                    
+                    newContainer.scrollTop = newContainer.scrollHeight;
+                }
+            }
         }
 
         function toggleMenu() {
@@ -3465,6 +3985,39 @@
         // Initialize app
         loadConfig();
         loadEntries();
+        
+        // Add keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            // Only handle arrow keys when on journal view and not typing in textarea/input
+            if (state.view !== 'journal') return;
+            if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+            
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                goToPreviousQuestion();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                goToNextQuestion();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (state.showAnswerInput) {
+                    // On answer card, go back to question
+                    hideAnswerInput();
+                } else {
+                    // On question card, go to previous question
+                    goToPreviousQuestion();
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (state.showAnswerInput) {
+                    // On answer card, go to next question
+                    goToNextQuestion();
+                } else {
+                    // On question card, show answer input
+                    showAnswerInput();
+                }
+            }
+        });
         
         // Auto-sync from cloud on startup (download latest)
         if (CONFIG.cloudSync.enabled) {
