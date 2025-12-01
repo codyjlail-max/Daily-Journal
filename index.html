@@ -1320,7 +1320,7 @@
                 const now = new Date();
                 const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
                 const currentDate = getCurrentDateWith4AMCutoff();
-                const dayOfWeek = now.getDay();
+                const dayOfWeek = getDayOfWeekWith4AMCutoff();
 
                 // Check if it's time to notify and we haven't notified today
                 if (currentTime === CONFIG.notifications.time && 
@@ -1426,6 +1426,20 @@
             return `${year}-${month}-${day}`;
         }
 
+        function getDayOfWeekWith4AMCutoff() {
+            const now = new Date();
+            const hour = now.getHours();
+            
+            // If before 4am, use yesterday's day of week
+            if (hour < 4) {
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                return yesterday.getDay();
+            }
+            
+            return now.getDay();
+        }
+
         let state = {
             view: 'journal',
             currentQuestionIndex: 0,
@@ -1444,12 +1458,12 @@
         };
 
         function getTheme() {
-            const dayOfWeek = new Date().getDay();
+            const dayOfWeek = getDayOfWeekWith4AMCutoff();
             return CONFIG.colorThemes[dayOfWeek];
         }
 
         function getTodaysQuestions() {
-            const dayOfWeek = new Date().getDay();
+            const dayOfWeek = getDayOfWeekWith4AMCutoff();
             const questions = [];
             
             // First add day-specific questions that match today
